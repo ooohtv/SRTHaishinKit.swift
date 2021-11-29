@@ -8,7 +8,13 @@ open class SRTConnection: NSObject {
     public private(set) var uri: URL?
     /// This instance connect to server(true) or not(false)
     @objc dynamic public private(set) var connected: Bool = false
-
+    
+    /// Track if a connection that was working was closed unexpectedly
+    @objc dynamic public private(set) var connectionBroken: Bool = false
+    
+    /// The incomming socket isn't actually needed, however disconnecting and trying to reconnect to OBS doesn't work on their end
+    /// With trying to establish this socket we get a failure in that case, but without the outgoing socket connects just fine and we "send" data
+    /// however it doesn't update in OBS, so keeping the incoming socket for now so we detect failure until we can figure out a way to have that not fail
     var incomingSocket: SRTIncomingSocket?
     var outgoingSocket: SRTOutgoingSocket?
     private var streams: [SRTStream] = []
@@ -20,23 +26,27 @@ open class SRTConnection: NSObject {
     deinit {
         streams.removeAll()
     }
-
-    public func connect(_ uri: URL?) {
+    
+    public func connect(_ uri: URL?) throws {
         guard let uri = uri, let scheme = uri.scheme, let host = uri.host, let port = uri.port, scheme == "srt" else {
-            return
+            throw SRTError.invalidArgument(message: "Invalid Configuration")
         }
-
+        
         self.uri = uri
         let options = SRTSocketOption.from(uri: uri)
         let addr = sockaddr_in(host, port: UInt16(port))
-
+        
+        if(connectionBroken) {
+            connectionBroken = false;
+        }
+        
         outgoingSocket = SRTOutgoingSocket()
         outgoingSocket?.delegate = self
-        ((try? outgoingSocket?.connect(addr, options: options)) as ()??)
-
+        try outgoingSocket?.connect(addr, options: options)
+        
         incomingSocket = SRTIncomingSocket()
         incomingSocket?.delegate = self
-        ((try? incomingSocket?.connect(addr, options: options)) as ()??)
+        try incomingSocket?.connect(addr, options: options)
     }
 
     public func close() {
@@ -73,5 +83,8 @@ extension SRTConnection: SRTSocketDelegate {
             return
         }
         connected = incomingSocket.status == SRTS_CONNECTED && outgoingSocket.status == SRTS_CONNECTED
+        if(!connectionBroken && (incomingSocket.status == SRTS_BROKEN || outgoingSocket.status == SRTS_BROKEN)) {
+            connectionBroken = true;
+        }
     }
 }

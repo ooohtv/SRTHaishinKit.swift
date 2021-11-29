@@ -66,17 +66,14 @@ class SRTSocket {
         }
 
         // prepare socket
-        socket = srt_socket(AF_INET, SOCK_DGRAM, 0)
-        if socket == SRT_ERROR {
-                let error_message = String(cString: srt_getlasterror_str())
-
-                logger.error(error_message)
-                throw SRTError.illegalState(message: error_message)
+        socket = srt_create_socket()
+        if socket == SRT_INVALID_SOCK {
+            throw createConnectionException()
         }
 
         self.options = options
         guard configure(.pre) else {
-            return
+            throw createConnectionException()
         }
 
         // prepare connect
@@ -87,18 +84,21 @@ class SRTSocket {
         }
 
         if stat == SRT_ERROR {
-
-            let error_message = String(cString: srt_getlasterror_str())
-
-            logger.error(error_message)
-            throw SRTError.illegalState(message: error_message)
+            throw createConnectionException()
         }
 
         guard configure(.post) else {
-            return
+            throw createConnectionException()
         }
 
         startRunning()
+    }
+    
+    private func createConnectionException() -> SRTError {
+        let error_message = String(cString: srt_getlasterror_str())
+
+        logger.error(error_message)
+        return SRTError.illegalState(message: error_message)
     }
 
     func close() {
